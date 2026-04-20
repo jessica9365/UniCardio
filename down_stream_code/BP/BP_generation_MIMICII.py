@@ -3,7 +3,7 @@
 import scipy.io
 import time
 import os
-os.chdir('/root/autodl-tmp/BioDiffuser')
+os.chdir('/home/shane/faceai/jess_faceai/UniCardio/base_model')
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 import numpy as np
@@ -15,8 +15,8 @@ import torch
 import torch.nn.functional as F
 from ts2vg import NaturalVG
 import yaml
-from diffusion_model_no_compress import diff_CSDI, CSDI_base
-from utils_nin_zongheng import train
+from diffusion_model_no_compress_final import diff_CSDI, CSDI_base
+from utils_together_original import train
 from self_process import imputation_pattern, AddNoise
 import neurokit2 as nk
 import pickle
@@ -50,8 +50,8 @@ signal_impute = torch.concatenate([signal_impute, null], dim = -1)
 signal_noisy = torch.concatenate([signal_noisy, null], dim = -1)
 
 
-test_size = 20000
-validation_size = 20000
+test_size = 0.15
+validation_size = 0.15
 
 inputs_train, inputs_temp = train_test_split(
     signal, test_size=test_size + validation_size, random_state=42
@@ -136,7 +136,7 @@ os.makedirs('MIMIC_II_results', exist_ok=True)
 for i, batch in enumerate(gen_loader):
     input_sig = batch[0].clone()
     start = time.time()
-    results = Model(input_sig.to(device), 50, '02', borrow_mode=0)
+    results = Model(input_sig.to(device), train_gen_flag=1, n_samples=50, model_flag='02', borrow_mode=0)
     end = time.time()
 
     # Save the results for each batch
