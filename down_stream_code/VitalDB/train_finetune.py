@@ -294,7 +294,7 @@ batch = next(iter(train_loader))
 print([x.shape for x in batch[:-1]]) 
 Model = CSDI_base(config, device, L = 500*4).to(device)
 Model = torch.nn.DataParallel(Model).to(device)
-Model.load_state_dict(torch.load("no_compress799.pth"))
+Model.load_state_dict(torch.load("/home/shane/faceai/jess_faceai/UniCardio/base_model/no_compress799.pth"))
 
 train(Model,config['train'],train_loader,valid_loader=val_loader,valid_epoch_interval=10)
 #%%%
