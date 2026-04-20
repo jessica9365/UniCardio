@@ -94,7 +94,22 @@ class Unsqueeze(nn.Module):
 
     def forward(self, x):
         return x.unsqueeze(self.dim)
-       
+
+class SBPDBPHead(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.pool = nn.AdaptiveAvgPool1d(1)   # global average over time
+        self.fc   = nn.Sequential(
+            nn.Linear(channels, 64),
+            nn.ReLU(),
+            nn.Linear(64, 2)                  # outputs [SBP, DBP]
+        )
+
+    def forward(self, h_abp):
+        # h_abp: (B, channels, L_abp) e.g. (B, C, L/4)
+        pooled = self.pool(h_abp).squeeze(-1)   # (B, channels)
+        return self.fc(pooled)                  # (B, 2)
+
 class diff_CSDI(nn.Module):
     def __init__(self, config, device, length, inputdim=1):
         super().__init__()
@@ -142,8 +157,10 @@ class diff_CSDI(nn.Module):
         self.norm2 = torch.nn.LayerNorm( [self.channels, int(length/4)]).to(device)
         self.norm3 = torch.nn.LayerNorm( [self.channels, int(length/4)]).to(device)
         self.norm4 = torch.nn.LayerNorm( [self.channels, int(length/4)]).to(device)
+        # SBP/DBP regression head on ABP features (uses x4)
+        self.sbp_dbp_head = SBPDBPHead(self.channels).to(device)
 
-    def forward(self, x, diffusion_step, mask, mode, borrow_mode):
+    def forward(self, x, diffusion_step, mask, mode, borrow_mode, return_bp_values=False):
         B, inputdim, L = x.shape
         x1 = x[:, :, 0:int(L/4)]
         x2 = x[:, :, int(L/4):int(L/2)]
@@ -186,41 +203,53 @@ class diff_CSDI(nn.Module):
         x3 = x[:, :, int(L/2):int(3*L/4)]
         x4 = x[:, :, int(3*L/4):L]
 
+        bp_values = None  # default
+
         if mode == 0:
-            x1 = self.output_projection1_1(x1)  # (B,channel,L)
+            x1 = self.output_projection1_1(x1)  # (B,channel,L/4)
             x1 = F.relu(x1)
-            x1 = self.output_projection1_2(x1)  # (B,1,L)
+            x1 = self.output_projection1_2(x1)  # (B,1,L/4)
             x = x1
-        if mode ==1:
-            x2 = self.output_projection2_1(x2)  # (B,channel,L)
+
+        if mode == 1:
+            x2 = self.output_projection2_1(x2)
             x2 = F.relu(x2)
-            x2 = self.output_projection2_2(x2)  # (B,1,L)
+            x2 = self.output_projection2_2(x2)
             x = x2
-        if mode ==2:
-            x3 = self.output_projection3_1(x3)  # (B,channel,L)
+
+        if mode == 2:
+            x3 = self.output_projection3_1(x3)
             x3 = F.relu(x3)
-            x3 = self.output_projection3_2(x3)  # (B,1,L)
+            x3 = self.output_projection3_2(x3)
             x = x3
-        if mode ==3:
+
+        if mode == 3:
+            # x4 holds ABP features (last quarter); use it for SBP/DBP if requested
+            if return_bp_values:
+                bp_values = self.sbp_dbp_head(x4)   # (B, 2)
+
             if borrow_mode == 0:
-                x4 = self.output_projection1_1(x4)  # (B,channel,L)
+                x4 = self.output_projection1_1(x4)
                 x4 = F.relu(x4)
-                x4 = self.output_projection1_2(x4)  # (B,1,L)
+                x4 = self.output_projection1_2(x4)
                 x = x4
             elif borrow_mode == 1:
-                x4 = self.output_projection2_1(x4)  # (B,channel,L)
+                x4 = self.output_projection2_1(x4)
                 x4 = F.relu(x4)
-                x4 = self.output_projection2_2(x4)  # (B,1,L)
+                x4 = self.output_projection2_2(x4)
                 x = x4
             else:
-                x4 = self.output_projection3_1(x4)  # (B,channel,L)
+                x4 = self.output_projection3_1(x4)
                 x4 = F.relu(x4)
-                x4 = self.output_projection3_2(x4)  # (B,1,L)
+                x4 = self.output_projection3_2(x4)
                 x = x4
-                
 
         x = x.reshape(B, inputdim, int(L/4))
-        return x
+
+        if return_bp_values and mode == 3:
+            return x, bp_values   # waveform, [SBP, DBP]
+        else:
+            return x
     
     
 class ResidualBlock(nn.Module):
