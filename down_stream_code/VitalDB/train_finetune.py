@@ -179,9 +179,9 @@ def create_simple_masks(signal_data, save_dir="./simple_masks"):
 os.CUDA_VISIBLE_DEVICES = '1,2,3,4,5,6,7' # Number of GPUs to use, you can change this based on your setup
 device = torch.device("cuda")
 # ── VitalDB DATA LOADING ──
-TRAIN_PATH = "/home/shane/archive/unicardio_vitaldb_train.npz"
-VAL_PATH   = "/home/shane/archive/unicardio_vitaldb_val.npz"
-STATS_PATH = "/home/shane/archive/unicardio_vitaldb_norm_stats.npz"
+TRAIN_PATH = "/cpfs01/shane/jess_data/data/archive/unicardio_vitaldb_train.npz"
+VAL_PATH   = "/cpfs01/shane/jess_data/data/archive/unicardio_vitaldb_val.npz"
+STATS_PATH = "/cpfs01/shane/jess_data/data/archive/unicardio_vitaldb_norm_stats.npz"
 _stats   = np.load(STATS_PATH)
 ABP_MEAN = float(_stats["abp_mean"])
 ABP_STD  = float(_stats["abp_std"])
@@ -190,15 +190,18 @@ print(f"ABP stats: mean={ABP_MEAN:.2f} | std={ABP_STD:.2f}")
 def load_vitaldb(path):
     d = np.load(path)
     ecg, ppg, abp = d["ecg"], d["ppg"], d["abp"]
+    sbp, dbp      = d["sbp"], d["dbp"]       # NEW
     N = ecg.shape[0]
-    sig = np.stack([ecg, ppg, abp], axis=1)
-    sig_flat = sig.reshape(N, -1)
+    sig = np.stack([ecg, ppg, abp], axis=1)  # (N, 3, 500)
+    sig_flat = sig.reshape(N, -1)            # (N, 1500)
     null = np.zeros((N, 500), dtype=np.float32)
-    out = np.concatenate([sig_flat, null], axis=1)
-    return torch.tensor(out, dtype=torch.float32)
+    out = np.concatenate([sig_flat, null], axis=1)  # (N, 2000)
+    signal = torch.tensor(out, dtype=torch.float32)
+    bp_vals = torch.tensor(np.stack([sbp, dbp], axis=-1), dtype=torch.float32)  # (N, 2)
+    return signal, bp_vals
 
-signal = load_vitaldb(TRAIN_PATH)
-signal_val = load_vitaldb(VAL_PATH)
+signal, bp_train = load_vitaldb(TRAIN_PATH)
+signal_val, bp_val = load_vitaldb(VAL_PATH)
 subject_ids = np.arange(len(signal))
 print(f"Train: {signal.shape} | Val: {signal_val.shape}")
 print(signal.shape)
@@ -258,11 +261,12 @@ subject_ids_val_arr = np.arange(len(signal_val))
 from torch.utils.data import Dataset, DataLoader
 
 class CustomSignalDataset(Dataset):
-    def __init__(self, signal, impute, noisy, mask, subject_ids):
+    def __init__(self, signal, impute, noisy, mask, bp_vals, subject_ids):
         self.signal = signal
         self.impute = impute
         self.noisy  = noisy
         self.mask   = mask
+        self.bp_vals = bp_vals          # (N, 2): [SBP, DBP] in mmHg
         self.subject_ids = subject_ids
 
     def __len__(self):
@@ -271,12 +275,13 @@ class CustomSignalDataset(Dataset):
     def __getitem__(self, idx):
         return (self.signal[idx], self.impute[idx],
                 self.noisy[idx], self.mask[idx],
+                self.bp_vals[idx],             # NEW
                 self.subject_ids[idx])
 
 train_dataset = CustomSignalDataset(
-    inputs_train, impute_train, noisy_train, mask_train, subject_ids_train)
+    inputs_train, impute_train, noisy_train, mask_train, bp_train, subject_ids_train)
 val_dataset   = CustomSignalDataset(
-    inputs_val, impute_val, noisy_val, mask_val, subject_ids_val_arr)
+    inputs_val, impute_val, noisy_val, mask_val, bp_val, subject_ids_val_arr)
 
 train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True,
                           pin_memory=True, num_workers=8)
@@ -285,9 +290,8 @@ val_loader   = DataLoader(val_dataset,   batch_size=128, shuffle=False)
 print(f"train_loader: {len(train_loader)} batches | val_loader: {len(val_loader)} batches")
 
 
-#%%
-# batch = next(iter(train_loader))  # [VitalDB] debug line removed
-#%%
+batch = next(iter(train_loader))
+print([x.shape for x in batch[:-1]]) 
 Model = CSDI_base(config, device, L = 500*4).to(device)
 Model = torch.nn.DataParallel(Model).to(device)
 Model.load_state_dict(torch.load("no_compress799.pth"))
