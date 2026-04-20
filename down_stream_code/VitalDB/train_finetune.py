@@ -17,7 +17,7 @@ from diffusion_model_no_compress_finetune import diff_CSDI, CSDI_base
 from utils_finetune import train
 # [VitalDB] from self_process import imputation_pattern, AddNoise
 import matplotlib.pyplot as plt
-import seaborn as sns
+# import seaborn as sns
 from collections import defaultdict
 
 import numpy as np
@@ -220,7 +220,7 @@ N = signal.shape[0]  # [VitalDB] signal is (N, 2000)
 mask = torch.zeros([signal.shape[0], signal.shape[1] // 4])  # [VitalDB] dummy mask
 # [VitalDB] signal_impute = torch.tensor(signal_impute[0], dtype = torch.float32)
 # [VitalDB] signal_noisy = torch.tensor(signal_noisy, dtype = torch.float32)
-file_path = 'base_no_compress_original.yaml'
+file_path = '/home/shane/faceai/jess_faceai/UniCardio/base_model/base_no_compress_original.yaml'
 
 with open(file_path, 'r') as file:
     config = yaml.safe_load(file)
